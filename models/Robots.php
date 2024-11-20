@@ -9,6 +9,16 @@ use Phalcon\Filter\Validation\Validator\Uniqueness;
 use Phalcon\Filter\Validation\Validator\InclusionIn;
 
 class Robots extends Model{
+
+    public $id;
+    public $name;
+    public $type;
+    public $year;
+
+    public function initialize(){
+        $this->setSource('robots');
+    }
+
     public function validation(){
         $validator = new Validation();
         $validator->add(
@@ -17,9 +27,28 @@ class Robots extends Model{
                 [
                     'message' => 'Type must be "droid", "mechanical", or "virtual"',
                     'domain'  => [
-                        'droid',
-                        'mechanical',
-                        'virtual',
+                        'Protocol',
+                        'Bounty Hunter',
+                        'Virtual Companion',
+                        'Agricultural',
+                        'Astromechanic',
+                        'Humanoid',
+                        'Delivery',
+                        'Chatbot',
+                        'Spambot',
+                        'Socialbot',
+                        'Janitorial',
+                        'Security',
+                        'Exploration',
+                        'Medical',
+                        'Educational',
+                        'Entertainment',
+                        'Rescue',
+                        'Military',
+                        'Hospitality',
+                        'Industrial',
+                        'Companion',
+                        'Pet',
                     ],
                 ]
             )

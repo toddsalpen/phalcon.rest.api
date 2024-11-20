@@ -192,3 +192,287 @@ Feel free to contribute to this project by submitting issues or pull requests! �
 8. **Featured Character**: Adds an engaging fictional element to make the README more visually appealing and fun.
 
 Let me know if you’d like further customizations! 😊
+```
+# Next Step
+
+Implementing role-based access control (RBAC) with token-based authentication in your PHP Phalcon REST API requires the following steps:
+
+---
+
+### **1. Database Setup**
+Create the necessary tables to manage users, roles, and permissions.
+
+#### Example Schema:
+
+```sql
+-- Users Table
+CREATE TABLE `users` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `username` VARCHAR(100) NOT NULL UNIQUE,
+    `password` VARCHAR(255) NOT NULL,
+    `role_id` INT NOT NULL,
+    `token` VARCHAR(255) DEFAULT NULL,
+    `token_expiration` DATETIME DEFAULT NULL,
+    FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`)
+);
+
+-- Roles Table
+CREATE TABLE `roles` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(50) NOT NULL UNIQUE
+);
+
+-- Permissions Table
+CREATE TABLE `permissions` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `role_id` INT NOT NULL,
+    `resource` VARCHAR(100) NOT NULL,
+    `action` VARCHAR(50) NOT NULL,
+    FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`)
+);
+```
+
+---
+
+### **2. Middleware for Token Validation**
+Create middleware to validate tokens passed in the `Authorization` header.
+
+#### File: `project_root/middleware/AuthMiddleware.php`
+
+```php
+<?php
+
+use Phalcon\Http\Request;
+use Phalcon\Http\Response;
+
+class AuthMiddleware
+{
+    public static function handle($role = null)
+    {
+        $request = new Request();
+        $response = new Response();
+
+        // Extract token from Authorization header
+        $authHeader = $request->getHeader('Authorization');
+        if (!$authHeader || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            $response->setStatusCode(401, 'Unauthorized');
+            $response->setJsonContent([
+                'status'  => 'error',
+                'message' => 'Missing or invalid token.',
+            ]);
+            $response->send();
+            return false;
+        }
+
+        $token = $matches[1];
+
+        // Validate token in the database
+        $user = Users::findFirst([
+            'conditions' => 'token = :token: AND token_expiration > NOW()',
+            'bind'       => ['token' => $token],
+        ]);
+
+        if (!$user) {
+            $response->setStatusCode(401, 'Unauthorized');
+            $response->setJsonContent([
+                'status'  => 'error',
+                'message' => 'Invalid or expired token.',
+            ]);
+            $response->send();
+            return false;
+        }
+
+        // Optional role-based authorization
+        if ($role && $user->role->name !== $role) {
+            $response->setStatusCode(403, 'Forbidden');
+            $response->setJsonContent([
+                'status'  => 'error',
+                'message' => 'Access denied for this role.',
+            ]);
+            $response->send();
+            return false;
+        }
+
+        return true; // Token and role validated
+    }
+}
+```
+
+---
+
+### **3. Authentication Logic**
+Add login functionality to generate and validate tokens.
+
+#### File: `project_root/controllers/AuthController.php`
+
+```php
+<?php
+
+use Phalcon\Http\Request;
+use Phalcon\Http\Response;
+
+class AuthController
+{
+    /**
+     * Handle user login and token generation.
+     */
+    public function login()
+    {
+        $request = new Request();
+        $response = new Response();
+
+        $data = json_decode($request->getRawBody(), true);
+        $username = $data['username'] ?? null;
+        $password = $data['password'] ?? null;
+
+        if (!$username || !$password) {
+            $response->setStatusCode(400, 'Bad Request');
+            $response->setJsonContent([
+                'status'  => 'error',
+                'message' => 'Username and password are required.',
+            ]);
+            return $response;
+        }
+
+        $user = Users::findFirst([
+            'conditions' => 'username = :username:',
+            'bind'       => ['username' => $username],
+        ]);
+
+        if (!$user || !password_verify($password, $user->password)) {
+            $response->setStatusCode(401, 'Unauthorized');
+            $response->setJsonContent([
+                'status'  => 'error',
+                'message' => 'Invalid credentials.',
+            ]);
+            return $response;
+        }
+
+        // Generate token
+        $token = bin2hex(random_bytes(32));
+        $user->token = $token;
+        $user->token_expiration = (new \DateTime('+1 hour'))->format('Y-m-d H:i:s');
+        $user->save();
+
+        $response->setStatusCode(200, 'OK');
+        $response->setJsonContent([
+            'status'  => 'success',
+            'message' => 'Login successful.',
+            'token'   => $token,
+        ]);
+        return $response;
+    }
+}
+```
+
+---
+
+### **4. Apply Middleware in Routes**
+Secure routes based on roles and token validation.
+
+#### Example in `project_root/routes/robots.php`:
+
+```php
+<?php
+
+use MyApp\Controllers\RobotsController;
+
+// Instantiate the controller
+$controller = new RobotsController();
+
+/**
+ * Route: Get all robots
+ */
+$app->get(
+    '/robots',
+    function () use ($controller) {
+        if (!AuthMiddleware::handle('admin')) { // Only admin role
+            return;
+        }
+        return $controller->getAll();
+    }
+);
+
+/**
+ * Route: Create a new robot
+ */
+$app->post(
+    '/robots',
+    function () use ($controller) {
+        if (!AuthMiddleware::handle('editor')) { // Editor and higher roles
+            return;
+        }
+        return $controller->create();
+    }
+);
+```
+
+---
+
+### **5. Hash Passwords During Registration**
+Ensure user passwords are securely hashed.
+
+```php
+$user = new Users();
+$user->username = 'admin';
+$user->password = password_hash('securepassword', PASSWORD_DEFAULT);
+$user->role_id = 1; // Example: Admin role
+$user->save();
+```
+
+---
+
+### **6. Testing**
+
+1. **Login to Get Token**:
+   ```bash
+   curl -X POST http://your-domain.com/auth/login \
+   -H "Content-Type: application/json" \
+   -d '{"username": "admin", "password": "securepassword"}'
+   ```
+
+2. **Access Protected Resource**:
+   ```bash
+   curl -X GET http://your-domain.com/robots \
+   -H "Authorization: Bearer your-generated-token"
+   ```
+
+3. **Response**:
+    - Unauthorized:
+      ```json
+      {
+          "status": "error",
+          "message": "Missing or invalid token."
+      }
+      ```
+
+    - Forbidden (Invalid Role):
+      ```json
+      {
+          "status": "error",
+          "message": "Access denied for this role."
+      }
+      ```
+
+    - Success:
+      ```json
+      [
+          {
+              "id": 1,
+              "name": "R2-D2",
+              "type": "Astromech Droid",
+              "year": 1977
+          }
+      ]
+      ```
+
+---
+
+### **Summary**
+- **Database Setup**: Users, roles, and permissions tables.
+- **Token Middleware**: Validate `Authorization` header.
+- **Authentication Logic**: Generate secure tokens during login.
+- **Role-Based Access Control**: Restrict routes based on roles.
+- **Password Hashing**: Securely hash user passwords.
+
+This implementation ensures a decent level of security with token-based authentication and RBAC. Let me know if you need further assistance! 🚀
